@@ -1,7 +1,7 @@
 # IzwiLakhe (izwilakhe.online)
 
 A Bible-study web app. Enter a passage and it prepares an eight-part background
-study (the writer, where he was, who was with him, the world around him, why he wrote, the events
+study (the writer, where he was, who was with him, the events around him, why he wrote, the events
 leading up to it, what was on his heart, and the message for us), each part with
 supporting verse references, in English and in isiZulu.
 

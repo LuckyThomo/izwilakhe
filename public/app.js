@@ -413,11 +413,11 @@ async function drawLibrary(kind, openId) {
              h("button", { class: "btn quiet small", ...hold(() => format(it.body, "u")) }, "Underline"),
              h("button", { class: "btn quiet small", ...hold(() => clearFormat(it.body)) }, "Clear marking"),
              h("span", { class: "spacer" }),
-             h("button", { class: "btn small", onclick: async () => { await api("/items/" + id, { method: "PATCH", body: { body: it.body } }); toast("Changes saved"); draw(false); } }, "Save changes"),
+             h("button", { class: "btn gold", onclick: async () => { await api("/items/" + id, { method: "PATCH", body: { body: it.body } }); toast("Saved"); draw(false); } }, "Save"),
              h("button", { class: "btn quiet small", onclick: () => openItem(id) }, "Cancel")]
           : [h("button", { class: "btn small", onclick: () => draw(true) }, "Edit, highlight or underline")];
         show(h("div", { class: "row no-print" }, back, h("span", { class: "hint" }, `${here?.name ?? ""} › ${it.title}`), h("span", { class: "spacer" }), !editing && actions()),
-          editing && h("p", { class: "hint no-print", style: "margin:12px 0 0" }, "Type in any heading or paragraph to change it. To highlight or underline, select words and press the button; the same words are then marked in the other box."),
+          editing && h("p", { class: "hint no-print", style: "margin:12px 0 0" }, "Type in any heading or paragraph to change it. To highlight or underline, select words and press the button; the same words are then marked in the other box. Press Save when you are done; nothing is kept until you do."),
           studyView(it.body, tools, editing));
       };
       draw(startEditing);
