@@ -59,6 +59,17 @@ function ask({ title, text, input, options, confirm = "Save", danger }) {
   });
 }
 
+// ---------- display mode: auto (follow the device), dark, white ----------
+function theme() {
+  try { return localStorage.getItem("theme") || "auto"; } catch { return "auto"; }
+}
+function setTheme(t) {
+  try { localStorage.setItem("theme", t); } catch {}
+  if (t === "auto") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = t;
+}
+setTheme(theme());
+
 // ---------- state & navigation ----------
 let me = { owner: false, publicAccess: false };
 let view = "study";
@@ -71,7 +82,10 @@ function drawNav() {
     ...tabs.map(([id, name]) => h("button", { "aria-current": view === id ? "page" : null, onclick: () => go(id) }, name)),
     me.owner
       ? h("button", { onclick: async () => { await api("/logout", { method: "POST" }); await boot(); } }, "Sign out")
-      : h("button", { "aria-current": view === "login" ? "page" : null, onclick: () => go("login") }, "Sign in"));
+      : h("button", { "aria-current": view === "login" ? "page" : null, onclick: () => go("login") }, "Sign in"),
+    h("select", { "aria-label": "Display mode", onchange: (e) => setTheme(e.target.value) },
+      h("option", { value: "auto" }, "Auto"), h("option", { value: "dark" }, "Dark"), h("option", { value: "light" }, "White")));
+  nav.querySelector("select").value = theme();
 }
 function go(id) {
   view = id;

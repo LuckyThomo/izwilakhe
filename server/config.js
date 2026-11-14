@@ -27,12 +27,12 @@ export const config = {
   models: {
     orchestrator: env.ORCHESTRATOR_MODEL || "claude-opus-5-5",
     writerA: env.WRITER_A_MODEL || "claude-sonnet-5-5",
-    writerB: env.WRITER_B_MODEL || env.OPENAI_MODEL || "gpt-5.6",
-    translator: env.TRANSLATOR_MODEL || env.GEMINI_MODEL || "gemini-2.5-pro",
+    writerB: env.WRITER_B_MODEL || "gpt-5.6",
+    writerC: env.WRITER_C_MODEL || "gemini-2.5-pro",
+    // Translation is done by the orchestrator unless another model is named here.
+    translator: env.TRANSLATOR_MODEL || env.ORCHESTRATOR_MODEL || "claude-opus-5-5",
   },
-  // "gemini" or "claude" (Claude = the orchestrator model does the translation).
-  translator: (env.TRANSLATOR || "gemini").toLowerCase(),
-  keys: { openai: env.OPENAI_API_KEY || "", gemini: env.GEMINI_API_KEY || "", nlt: env.NLT_API_KEY || "" },
+  keys: { openai: env.OPENAI_API_KEY || "", gemini: env.GEMINI_API_KEY || "" },
   // USD per million tokens [input, output]. Claude prices are the published ones;
   // set the OpenAI and Gemini prices in .env so the cost page can price those steps.
   prices: {

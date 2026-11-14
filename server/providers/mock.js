@@ -19,13 +19,13 @@ export async function callMock({ role, schema, user }) {
       paragraph: para(role, s),
       // The last section deliberately carries a reference that does not exist,
       // so the automatic check and repair step are exercised.
-      references: i === 6 ? ["Hezekiah 4:2", "Acts 10:99", "Romans 2:11"] : [REFS[i], REFS[(i + 1) % 7]],
+      references: i === SECTIONS.length - 1 ? ["Hezekiah 4:2", "Acts 10:99", "Romans 2:11"] : [REFS[i], REFS[(i + 1) % 7]],
     }));
     if (role === "review") {
       const ask = /remaining: 2/.test(user);
       data = ask
-        ? { decision: "ask", questions_for_writer_a: ["Which sources place the writer here?"], questions_for_writer_b: [], sections: [] }
-        : { decision: "finalize", questions_for_writer_a: [], questions_for_writer_b: [], sections };
+        ? { decision: "ask", questions_for_writer_a: ["Which sources place the writer here?"], questions_for_writer_b: [], questions_for_writer_c: ["Is this date firm?"], sections: [] }
+        : { decision: "finalize", questions_for_writer_a: [], questions_for_writer_b: [], questions_for_writer_c: [], sections };
     } else data = { sections, uncertainties: ["Test uncertainty."] };
   }
   return { data: schema.parse(data), tokensIn: 2500, tokensOut: 4000 };

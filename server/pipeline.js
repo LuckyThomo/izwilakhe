@@ -1,9 +1,9 @@
-// The study pipeline: two writers draft independently, the orchestrator reviews
+// The study pipeline: three writers draft independently, the orchestrator reviews
 // (at most two rounds of questions), writes the final study, references are
 // checked by code, and the result is translated into isiZulu.
 import { config, priceOf } from "./config.js";
 import { checkReference } from "./bible.js";
-import { fetchNlt } from "./nlt.js";
+import { passageText } from "./passage.js";
 import * as P from "./prompts.js";
 import { callClaude } from "./providers/claude.js";
 import { callOpenAI } from "./providers/openai.js";
@@ -57,34 +57,33 @@ export async function runStudy(passage, onStage = () => {}) {
   const M = config.models;
   try {
     onStage("Reading the passage");
-    const text = await fetchNlt(passage);
+    const text = passageText(passage);
 
-    onStage("Two writers are studying the passage");
+    onStage("Three writers are studying the passage");
     const user = P.writerUser(passage, text);
-    const draft = (label, model, userMsg) =>
-      call(steps, label, "writer", model, { system: P.WRITER_SYSTEM, user: userMsg, schema: P.DraftSchema, name: "draft", effort: "high" })
+    const draft = (w, label, userMsg) =>
+      call(steps, `Writer ${w.id.toUpperCase()} ${label}`, "writer", w.model, { system: P.WRITER_SYSTEM, user: userMsg, schema: P.DraftSchema, name: "draft", effort: "high" })
         .then((d) => (ordered(d.sections) ? d : null))
         .catch(() => null);
-    let [a, b] = await Promise.all([draft("Writer A draft", M.writerA, user), draft("Writer B draft", M.writerB, user)]);
-    if (!a && !b) throw new Error("Neither writer could produce a draft. Please try again.");
+    const writers = [{ id: "a", model: M.writerA }, { id: "b", model: M.writerB }, { id: "c", model: M.writerC }];
+    await Promise.all(writers.map(async (w) => { w.draft = await draft(w, "draft", user); }));
+    if (!writers.some((w) => w.draft)) throw new Error("None of the writers could produce a draft. Please try again.");
 
     let final = null;
     for (let round = 0; round <= config.maxReviewRounds && !final; round++) {
       const left = config.maxReviewRounds - round;
-      onStage(round === 0 ? "The reviewer is comparing the two drafts" : `The reviewer is checking the answers (round ${round})`);
+      onStage(round === 0 ? "The reviewer is comparing the drafts" : `The reviewer is checking the answers (round ${round})`);
       const review = await call(steps, `Review ${round + 1}`, "review", M.orchestrator, {
-        system: P.REVIEW_SYSTEM, user: P.reviewUser(passage, text, a, b, left), schema: P.ReviewSchema, name: "review", effort: "high",
+        system: P.REVIEW_SYSTEM, user: P.reviewUser(passage, text, writers, left), schema: P.ReviewSchema, name: "review", effort: "high",
       });
-      const qa = a ? review.questions_for_writer_a.filter(Boolean) : [];
-      const qb = b ? review.questions_for_writer_b.filter(Boolean) : [];
-      if (review.decision === "ask" && left > 0 && (qa.length || qb.length)) {
+      const asked = writers
+        .map((w) => ({ w, questions: w.draft ? (review[`questions_for_writer_${w.id}`] || []).filter(Boolean) : [] }))
+        .filter((x) => x.questions.length);
+      if (review.decision === "ask" && left > 0 && asked.length) {
         onStage(`The writers are answering the reviewer's questions (round ${round + 1})`);
-        const [a2, b2] = await Promise.all([
-          qa.length ? draft(`Writer A answers ${round + 1}`, M.writerA, P.followUpUser(passage, a, qa)) : a,
-          qb.length ? draft(`Writer B answers ${round + 1}`, M.writerB, P.followUpUser(passage, b, qb)) : b,
-        ]);
-        a = a2 || a;
-        b = b2 || b;
+        await Promise.all(asked.map(async ({ w, questions }) => {
+          w.draft = (await draft(w, `answers ${round + 1}`, P.followUpUser(passage, w.draft, questions))) || w.draft;
+        }));
         continue;
       }
       final = ordered(review.sections);
@@ -109,8 +108,7 @@ export async function runStudy(passage, onStage = () => {}) {
 
     onStage("Translating into isiZulu");
     const english = final.map((s) => s.paragraph);
-    const viaClaude = config.translator === "claude";
-    const tr = await call(steps, "Translation", "translate", viaClaude ? M.orchestrator : M.translator, {
+    const tr = await call(steps, "Translation", "translate", M.translator, {
       system: P.TRANSLATE_SYSTEM, user: JSON.stringify(english), schema: P.TranslationSchema, name: "translation", effort: "medium",
     });
     const zulu = (tr.paragraphs || []).map((p) => String(p).trim());
