@@ -9,12 +9,12 @@ export const SECTIONS = [
   { key: "place", en: "Where He Was", zu: "Lapho Ayekhona",
     brief: "The place (town or area, and the country or region as it was then, with today's country where helpful) where the writer was when he wrote this passage. Where he had come from shortly before, when, and why, only if it is relevant and recent to the writing." },
   { key: "company", en: "Who Was With Him", zu: "Ayenobani Futhi Enzani",
-    brief: "Who the writer was with at that moment, and what he and they were doing, if this is known. If nothing is known about his companions or activity, say so plainly in a shorter paragraph." },
-  { key: "setting", en: "The World Around Him", zu: "Okwakwenzeka Ngaleso Sikhathi",
+    brief: "The people who were with the writer and around him at that point in time (companions, fellow workers, hosts, guards, the people he was serving), and what he and they were doing, if this is known. If nothing is known about them, say so plainly in a shorter paragraph." },
+  { key: "setting", en: "The World Around Him", zu: "Izehlakalo Ezazenzeka Ngalesosikhathi",
     brief: "What was happening in that area and country at the time of writing: rulers, politics, religion, the condition of God's people or the church." },
   { key: "cause", en: "Why He Wrote", zu: "Okwamenza Abhale",
     brief: "How the writer came to write this passage: what caused or pushed him to write it, and why." },
-  { key: "events", en: "Events Leading Up to It", zu: "Izehlakalo Ezazenzeka Ngalesosikhathi",
+  { key: "events", en: "Events Leading Up to It", zu: "Izehlakalo Ezandulelayo",
     brief: "The major events just before or during the writing, in and around where the writer was or had come from, and the events the passage itself records where that helps." },
   { key: "heart", en: "On His Heart", zu: "Okwakusenhliziyweni Yakhe",
     brief: "What was going on in the writer's life and mind at that time or just before. This is inference: ground it in what Scripture shows and word it as inference, not as fact." },
@@ -117,3 +117,9 @@ export const TRANSLATE_SYSTEM = `You translate a Christian Bible study from Engl
 ${BOOKS.map(([, e, z]) => `${e} = ${z}`).join("; ")}
 - Keep every caution in the English ("it is not known", "tradition says", "scholars think", "probably") just as cautious in isiZulu.
 - You receive a JSON list of English paragraphs. Return JSON {"paragraphs": [...]} with the same number of paragraphs in the same order, each one the translation of the paragraph in that position.`;
+
+export const MatchSchema = z.object({ match: z.string() });
+export const MATCH_SYSTEM = `You are given a paragraph, a part of it that a reader has marked, and a translation of the whole paragraph. Find the part of the translation that says the same thing as the marked part.
+Return it copied from the translation character for character, with no change at all, so that it can be found there by exact search. Return only as much as corresponds to the marked part. If nothing in the translation corresponds, return an empty string.`;
+export const matchUser = (source, selection, target) =>
+  `Paragraph:\n${source}\n\nMarked part:\n${selection}\n\nTranslation of the paragraph:\n${target}`;

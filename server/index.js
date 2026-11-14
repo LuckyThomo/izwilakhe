@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { config } from "./config.js";
 import { q, migrate } from "./db.js";
 import { parsePassage } from "./bible.js";
-import { runStudy, totalCost } from "./pipeline.js";
+import { runStudy, totalCost, matchPhrase } from "./pipeline.js";
 
 if (!config.ownerPassword || config.sessionSecret.length < 16) {
   console.error("Set OWNER_PASSWORD and a SESSION_SECRET of at least 16 characters in .env");
@@ -216,14 +216,25 @@ app.delete("/api/items/:id", owner, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// Repeats a highlight or underline in the other language's box.
+app.post("/api/match", owner, wrap(async (req, res) => {
+  const [source, selection, target] = ["source", "selection", "target"].map((k) => String(req.body?.[k] ?? "").slice(0, 6000));
+  if (!selection.trim() || !target.trim()) return res.json({ match: "" });
+  const started = Date.now();
+  const { match, steps } = await matchPhrase(source, selection, target);
+  await q("INSERT INTO runs (ref_osis, ref_en, requester, ip_hash, cached, status, steps, cost_usd, duration_ms) VALUES ('match','Highlight match','owner',?,0,?,?,?,?)",
+    [ipHash(req), match ? "ok" : "error", JSON.stringify(steps), totalCost(steps), Date.now() - started]);
+  res.json({ match });
+}));
+
 // ---------- costs (owner only) ----------
 app.get("/api/costs", owner, wrap(async (req, res) => {
   const runs = await q("SELECT id, ref_en, requester, cached, status, steps, cost_usd, duration_ms, error, created_at FROM runs ORDER BY id DESC LIMIT 200");
   const [totals] = await q(
-    `SELECT COUNT(*) AS studies, SUM(cached) AS cached, COALESCE(SUM(cost_usd),0) AS total,
+    `SELECT SUM(ref_osis<>'match') AS studies, SUM(cached) AS cached, COALESCE(SUM(cost_usd),0) AS total,
             COALESCE(SUM(CASE WHEN created_at >= CURDATE() THEN cost_usd END),0) AS today,
             COALESCE(SUM(CASE WHEN created_at >= DATE_FORMAT(CURDATE(),'%Y-%m-01') THEN cost_usd END),0) AS month,
-            AVG(CASE WHEN cached=0 AND status='ok' THEN cost_usd END) AS average,
+            AVG(CASE WHEN cached=0 AND status='ok' AND ref_osis<>'match' THEN cost_usd END) AS average,
             SUM(cached=0 AND cost_usd IS NULL) AS unpriced
      FROM runs`);
   res.json({ totals, runs: runs.map((r) => ({ ...r, steps: JSON.parse(r.steps || "[]") })) });

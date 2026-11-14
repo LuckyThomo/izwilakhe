@@ -134,3 +134,18 @@ export function totalCost(steps) {
   if (steps.some((s) => s.cost == null)) return null; // a price is not set
   return steps.reduce((n, s) => n + s.cost, 0);
 }
+
+// Finds the words in `target` (the other language) that correspond to `selection`
+// in `source`, so a highlight in one box can be repeated in the other.
+export async function matchPhrase(source, selection, target) {
+  const steps = [];
+  let match = "";
+  try {
+    const out = await call(steps, "Highlight match", "match", config.models.translator, {
+      system: P.MATCH_SYSTEM, user: P.matchUser(source, selection, target), schema: P.MatchSchema, name: "match", effort: "low",
+    });
+    const m = String(out.match || "");
+    match = target.includes(m) ? m : target.includes(m.trim()) ? m.trim() : "";
+  } catch {}
+  return { match, steps };
+}

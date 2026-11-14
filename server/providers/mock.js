@@ -11,6 +11,10 @@ export async function callMock({ role, schema, user }) {
   if (role === "translate") {
     const list = JSON.parse(user.slice(user.indexOf("[")));
     data = { paragraphs: list.map((p) => "[UMBHALO WOKUHLOLA] " + p) };
+  } else if (role === "match") {
+    const [, selection, target] = user.split(/\n\n(?:Marked part|Translation of the paragraph):\n/);
+    const n = selection.trim().split(/\s+/).length;
+    data = { match: target.split(" ").slice(2, 2 + n).join(" ") };
   } else if (role === "repair") {
     data = { sections: SECTIONS.map((s) => ({ key: s.key, references: ["John 3:16", "Psalm 119:105", "Romans 10:17"] })) };
   } else {

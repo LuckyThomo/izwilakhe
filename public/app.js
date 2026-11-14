@@ -112,6 +112,57 @@ function drawLogin() {
   pw.focus();
 }
 
+// ---------- text with highlight and underline ----------
+const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
+// Keeps only text, <mark> and <u>; everything else is reduced to its text.
+function clean(html) {
+  const t = document.createElement("template");
+  t.innerHTML = html;
+  const walk = (node) => {
+    for (const c of [...node.childNodes]) {
+      if (c.nodeType === 1) {
+        walk(c);
+        if (c.tagName === "MARK" || c.tagName === "U") for (const a of [...c.attributes]) c.removeAttribute(a.name);
+        else c.replaceWith(...c.childNodes);
+      } else if (c.nodeType !== 3) c.remove();
+    }
+  };
+  walk(t.content);
+  const d = document.createElement("div");
+  d.append(t.content);
+  d.normalize();
+  return d.innerHTML;
+}
+function wrapRange(range, tag) {
+  const el = document.createElement(tag);
+  el.append(range.extractContents());
+  range.insertNode(el);
+  return el;
+}
+// A range covering the first occurrence of `str` in the element's text.
+function rangeForText(el, str) {
+  const at = el.textContent.indexOf(str);
+  if (!str || at < 0) return null;
+  const range = document.createRange();
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let seen = 0, started = false;
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const end = seen + n.length;
+    if (!started && at < end) { range.setStart(n, at - seen); started = true; }
+    if (started && at + str.length <= end) { range.setEnd(n, at + str.length - seen); return range; }
+    seen = end;
+  }
+  return null;
+}
+function editableSelection() {
+  const sel = getSelection();
+  if (!sel.rangeCount || sel.isCollapsed) return null;
+  const range = sel.getRangeAt(0);
+  const node = range.commonAncestorContainer;
+  const p = (node.nodeType === 1 ? node : node.parentElement)?.closest("p[data-i]");
+  return p && p.isContentEditable ? { range, p } : null;
+}
+
 // ---------- study ----------
 const LANGS = { en: { name: "English", tag: "Box 1", refs: "Supporting verses" }, zu: { name: "isiZulu", tag: "Box 2", refs: "Amavesi asekelayo" } };
 
@@ -136,18 +187,59 @@ function studyBox(study, lang, editing) {
       h("button", { class: "btn small", onclick: async () => { await navigator.clipboard.writeText(text().replaceAll("*", "")); toast("Copied"); } }, "Copy"),
       h("a", { class: "btn small", target: "_blank", rel: "noopener", href: "https://wa.me/?text=" + encodeURIComponent(text()),
         onclick: (e) => { e.currentTarget.href = "https://wa.me/?text=" + encodeURIComponent(text()); } }, "WhatsApp")),
-    h("div", { class: "inner" }, study.sections.map((s) =>
+    h("div", { class: "inner", tabIndex: 0, "aria-label": `${L.name} study text` }, study.sections.map((s, i) =>
       h("div", { class: "section" },
-        h("h3", {}, s[lang].title),
-        h("p", { contentEditable: editing ? "true" : "inherit", oninput: (e) => { s[lang].paragraph = e.currentTarget.innerText.trim(); } }, s[lang].paragraph),
+        h("h3", { contentEditable: editing ? "true" : "inherit", oninput: (e) => { s[lang].title = e.currentTarget.textContent.trim(); },
+          onkeydown: (e) => { if (e.key === "Enter") e.preventDefault(); } }, s[lang].title),
+        h("p", { "data-i": i, "data-lang": lang, contentEditable: editing ? "true" : "inherit", innerHTML: clean(s[lang].html ?? esc(s[lang].paragraph)),
+          oninput: (e) => syncParagraph(study, e.currentTarget), onkeydown: (e) => { if (e.key === "Enter") e.preventDefault(); } }),
         s[lang].references.length ? h("ul", { class: "refs", "aria-label": L.refs }, s[lang].references.map((r) => h("li", {}, r))) : null))));
+}
+
+// Copies what is on screen in a paragraph back into the study's data.
+function syncParagraph(study, p) {
+  const x = study.sections[Number(p.dataset.i)][p.dataset.lang];
+  x.html = clean(p.innerHTML);
+  x.paragraph = p.textContent.trim();
+}
+
+// Highlight or underline the selected words, then repeat it on the matching
+// words in the other language's box.
+async function format(study, tag) {
+  const picked = editableSelection();
+  if (!picked) return toast("First select some words in a paragraph.");
+  const { range, p } = picked;
+  const selection = range.toString().trim();
+  if (!selection) return;
+  wrapRange(range, tag);
+  getSelection().removeAllRanges();
+  syncParagraph(study, p);
+  const other = document.querySelector(`p[data-i="${p.dataset.i}"][data-lang="${p.dataset.lang === "en" ? "zu" : "en"}"]`);
+  if (!other) return;
+  toast("Finding the same words in the other box…");
+  try {
+    const { match } = await api("/match", { body: { source: p.textContent, selection, target: other.textContent } });
+    const r = rangeForText(other, match);
+    if (!r) return toast("The same words could not be found in the other box. Please mark them there yourself.");
+    wrapRange(r, tag);
+    syncParagraph(study, other);
+    toast("Marked in both boxes");
+  } catch (x) { toast(x.message); }
+}
+// Removes highlight and underline from every marked piece the selection touches.
+function clearFormat(study) {
+  const picked = editableSelection();
+  if (!picked) return toast("First select the marked words.");
+  for (const el of [...picked.p.querySelectorAll("mark, u")]) if (picked.range.intersectsNode(el)) el.replaceWith(...el.childNodes);
+  picked.p.normalize();
+  syncParagraph(study, picked.p);
 }
 
 // Renders a study (both boxes). `extra` is a row of buttons shown above the boxes.
 function studyView(study, extra, editing = false) {
   return h("div", {},
     h("div", { class: "study-head" }, h("h1", {}, study.reference.en), h("p", {}, study.reference.zu), h("div", { class: "rule" })),
-    h("div", { class: "row end no-print" }, extra, h("button", { class: "btn quiet small", onclick: () => window.print() }, "Print / PDF")),
+    h("div", { class: "row end no-print" + (editing ? " toolbar" : "") }, extra, h("button", { class: "btn quiet small", onclick: () => window.print() }, "Print / PDF")),
     studyBox(study, "en", editing), studyBox(study, "zu", editing));
 }
 
@@ -200,7 +292,8 @@ async function drawStudy() {
   function showResult(study, itemId) {
     const savedIn = itemId && folders.find((f) => String(f.id) === folder.value);
     let extra = null;
-    if (me.owner && savedIn) extra = h("span", { class: "hint" }, `Saved in History › ${savedIn.name}`);
+    if (me.owner && savedIn) extra = [h("span", { class: "hint" }, `Saved in History › ${savedIn.name}`),
+      h("button", { class: "btn quiet small", onclick: () => { view = "history"; drawNav(); drawLibrary("history", itemId); } }, "Edit, highlight or underline")];
     else if (me.owner && folders.length) extra = h("button", { class: "btn quiet small", onclick: async (e) => {
       const id = await ask({ title: "Save this study", text: "Choose the History folder.", options: folders, confirm: "Save" });
       if (!id) return;
@@ -219,7 +312,7 @@ async function drawStudy() {
 }
 
 // ---------- History & Church Programs (same folder/item library) ----------
-async function drawLibrary(kind) {
+async function drawLibrary(kind, openId) {
   const isHistory = kind === "history";
   const noun = isHistory ? "study" : "document";
   let folders = [], current = null, term = "";
@@ -230,7 +323,6 @@ async function drawLibrary(kind) {
       h("p", {}, isHistory ? "Your saved studies, kept in folders and listed alphabetically." : "Your own folders and documents for church programs, orders of service and notes."), h("div", { class: "rule" })),
     h("div", { class: "lib" }, side, pane));
 
-  const others = () => folders.filter((f) => f.id !== current?.id);
   async function load(keepId) {
     folders = await api("/folders?kind=" + kind);
     current = folders.find((f) => f.id === (keepId ?? current?.id)) || folders[0] || null;
@@ -282,43 +374,59 @@ async function drawLibrary(kind) {
         ? h("ul", { class: "list" }, items.map((it) => h("li", { class: "item" },
             h("button", { class: "name", onclick: () => openItem(it.id) }, it.title),
             h("small", {}, new Date(it.updated_at).toLocaleDateString()),
-            h("span", { class: "row" },
-              h("button", { class: "btn quiet small", onclick: async () => {
-                const title = await ask({ title: "Rename", input: it.title });
-                if (title?.trim()) { await api("/items/" + it.id, { method: "PATCH", body: { title } }); await drawItems(); }
-              } }, "Rename"),
-              h("button", { class: "btn quiet small", onclick: async () => {
-                const id = await ask({ title: `Copy "${it.title}"`, text: "Choose the folder to paste the copy into.", options: folders, confirm: "Copy here" });
-                if (id) { await api(`/items/${it.id}/copy`, { body: { folderId: Number(id) } }); await load(); toast("Copied"); }
-              } }, "Copy"),
-              others().length ? h("button", { class: "btn quiet small", onclick: async () => {
-                const id = await ask({ title: `Move "${it.title}"`, text: "Choose the folder to move it to.", options: others(), confirm: "Move" });
-                if (id) { await api("/items/" + it.id, { method: "PATCH", body: { folderId: Number(id) } }); await load(); toast("Moved"); }
-              } }, "Move") : null,
-              h("button", { class: "btn quiet small danger", onclick: async () => {
-                if (await ask({ title: `Delete "${it.title}"?`, text: "This cannot be undone.", confirm: "Delete", danger: true })) { await api("/items/" + it.id, { method: "DELETE" }); await load(); }
-              } }, "Delete")))))
+            itemActions(it, () => load()))))
         : h("p", { class: "empty" }, term ? "Nothing in this folder matches your search." : isHistory ? "No studies saved here yet. Choose this folder on the Study page to save one." : "No documents here yet."));
   }
 
-  async function openItem(id) {
+  // Rename, copy, move and delete for one study or document. Used both in the
+  // folder's list and on the opened study or document itself.
+  function itemActions(it, after) {
+    const elsewhere = folders.filter((f) => f.id !== it.folder_id);
+    return h("span", { class: "row" },
+      h("button", { class: "btn quiet small", onclick: async () => {
+        const title = await ask({ title: "Rename", input: it.title });
+        if (title?.trim()) { await api("/items/" + it.id, { method: "PATCH", body: { title } }); await after("renamed"); }
+      } }, "Rename"),
+      h("button", { class: "btn quiet small", onclick: async () => {
+        const id = await ask({ title: `Copy "${it.title}"`, text: "Choose the folder to paste the copy into.", options: folders, confirm: "Copy here" });
+        if (id) { await api(`/items/${it.id}/copy`, { body: { folderId: Number(id) } }); toast("Copied"); await after("copied"); }
+      } }, "Copy"),
+      elsewhere.length ? h("button", { class: "btn quiet small", onclick: async () => {
+        const id = await ask({ title: `Move "${it.title}"`, text: "Choose the folder to move it to.", options: elsewhere, confirm: "Move" });
+        if (id) { await api("/items/" + it.id, { method: "PATCH", body: { folderId: Number(id) } }); toast("Moved"); await after("moved"); }
+      } }, "Move") : null,
+      h("button", { class: "btn quiet small danger", onclick: async () => {
+        if (await ask({ title: `Delete "${it.title}"?`, text: "This cannot be undone.", confirm: "Delete", danger: true })) { await api("/items/" + it.id, { method: "DELETE" }); await after("deleted"); }
+      } }, "Delete"));
+  }
+
+  async function openItem(id, startEditing = false) {
     const it = await api("/items/" + id);
+    const here = folders.find((f) => f.id === it.folder_id);
+    const actions = () => itemActions(it, (what) => (what === "deleted" ? drawLibrary(kind) : openItem(id)));
+    const hold = (fn) => ({ onmousedown: (e) => e.preventDefault(), onclick: fn }); // keep the text selection when a button is pressed
     const back = h("button", { class: "btn quiet small", onclick: () => drawLibrary(kind).then(() => {}) }, "‹ Back to " + (isHistory ? "History" : "Church Programs"));
     if (it.body.type === "study") {
       const draw = (editing) => {
-        const actions = editing
-          ? [h("button", { class: "btn small", onclick: async () => { await api("/items/" + id, { method: "PATCH", body: { body: it.body } }); toast("Changes saved"); draw(false); } }, "Save changes"),
+        const tools = editing
+          ? [h("button", { class: "btn quiet small", ...hold(() => format(it.body, "mark")) }, "Highlight"),
+             h("button", { class: "btn quiet small", ...hold(() => format(it.body, "u")) }, "Underline"),
+             h("button", { class: "btn quiet small", ...hold(() => clearFormat(it.body)) }, "Clear marking"),
+             h("span", { class: "spacer" }),
+             h("button", { class: "btn small", onclick: async () => { await api("/items/" + id, { method: "PATCH", body: { body: it.body } }); toast("Changes saved"); draw(false); } }, "Save changes"),
              h("button", { class: "btn quiet small", onclick: () => openItem(id) }, "Cancel")]
-          : [h("button", { class: "btn quiet small", onclick: () => draw(true) }, "Edit text")];
-        show(h("div", { class: "row no-print" }, back, h("span", { class: "hint" }, it.title)), studyView(it.body, actions, editing));
+          : [h("button", { class: "btn small", onclick: () => draw(true) }, "Edit, highlight or underline")];
+        show(h("div", { class: "row no-print" }, back, h("span", { class: "hint" }, `${here?.name ?? ""} › ${it.title}`), h("span", { class: "spacer" }), !editing && actions()),
+          editing && h("p", { class: "hint no-print", style: "margin:12px 0 0" }, "Type in any heading or paragraph to change it. To highlight or underline, select words and press the button; the same words are then marked in the other box."),
+          studyView(it.body, tools, editing));
       };
-      draw(false);
+      draw(startEditing);
     } else {
       const title = h("input", { type: "text", value: it.title, maxLength: 200, "aria-label": "Title" });
       const text = h("textarea", { value: it.body.text || "", "aria-label": "Document text", placeholder: "Write or paste here…" });
       const save = async () => { await api("/items/" + id, { method: "PATCH", body: { title: title.value, body: { type: "doc", text: text.value } } }); toast("Saved"); };
       show(
-        h("div", { class: "row no-print" }, back),
+        h("div", { class: "row no-print" }, back, h("span", { class: "hint" }, `${here?.name ?? ""} › ${it.title}`), h("span", { class: "spacer" }), actions()),
         h("div", { class: "card", style: "margin-top:14px" },
           h("label", {}, "Title"), title, h("label", {}, "Text"), text,
           h("div", { class: "row no-print", style: "margin-top:14px" },
@@ -331,6 +439,7 @@ async function drawLibrary(kind) {
   }
 
   await load();
+  if (openId) await openItem(openId, true);
 }
 
 // ---------- costs ----------
@@ -351,7 +460,7 @@ async function drawCosts() {
       h("td", {}, new Date(r.created_at).toLocaleString()),
       h("td", {}, r.ref_en),
       h("td", {}, r.requester === "owner" ? "You" : "Visitor"),
-      h("td", {}, r.status === "error" ? "Failed" : r.cached ? "Saved copy" : "New study"),
+      h("td", {}, r.ref_en === "Highlight match" ? "Marking" : r.status === "error" ? "Failed" : r.cached ? "Saved copy" : "New study"),
       h("td", { class: "num" }, r.cached ? usd(0) : r.cost_usd == null ? "price not set" : usd(r.cost_usd, 4)),
       h("td", {}, h("button", { class: "btn quiet small", onclick: () => { detail.hidden = !detail.hidden; } }, "Steps"))), detail);
   }
