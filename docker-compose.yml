@@ -1,0 +1,33 @@
+# Runs IzwiLakhe and its own database, separate from anything else on the server.
+# The app listens only on 127.0.0.1:3080; the server's web server passes
+# izwilakhe.online to it (see deploy/nginx.conf).
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_HOST: db
+      DB_USER: izwilakhe
+      DB_NAME: izwilakhe
+    ports:
+      - "127.0.0.1:3080:3080"
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: izwilakhe
+      MARIADB_USER: izwilakhe
+      MARIADB_PASSWORD: ${DB_PASSWORD}
+      MARIADB_RANDOM_ROOT_PASSWORD: "yes"
+    volumes:
+      - dbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      retries: 20
+volumes:
+  dbdata:
